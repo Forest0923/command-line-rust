@@ -16,7 +16,26 @@ pub fn run(config: Config) -> MyResult<()> {
     for filename in config.files {
         match open(&filename) {
             Err(e) => eprintln!("Faild to open {}: {}", filename, e),
-            Ok(_) => println!("Opened {}", filename),
+            Ok(file) => {
+                let mut line_num = 1;
+                for lines_iter in file.lines() {
+                    let line = lines_iter?;
+                    if config.number_lines {
+                        println!("{:>6}\t{}", line_num, line);
+                        line_num += 1;
+                    } else if config.number_nonblank_lines {
+                        if line.is_empty() {
+                            println!("");
+                        } else {
+                            println!("{:>6}\t{}", line_num, line);
+                            line_num += 1;
+                        }
+                    } else {
+                        println!("{}", line);
+                        line_num += 1;
+                    }
+                }
+            }
         }
     }
     Ok(())
