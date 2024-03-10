@@ -1,4 +1,5 @@
 use clap::{App, Arg};
+use regex::Regex;
 use std::error::Error;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read};
@@ -8,13 +9,30 @@ type MyResult<T> = Result<T, Box<dyn Error>>;
 #[derive(Debug)]
 pub struct Config {
     files: Vec<String>,
-    lines: usize,
+    lines: isize,
+    is_negative_lines: bool,
     bytes: Option<usize>,
+}
+
+fn count_lines(filename: &str) -> MyResult<isize> {
+    let mut file = BufReader::new(File::open(filename)?);
+    let mut num_lines = 0;
+    let mut buf = Vec::new();
+    loop {
+        let bytes_read = file.read_until(b'\n', &mut buf)?;
+        if bytes_read == 0 {
+            break;
+        }
+        num_lines += 1;
+        buf.clear();
+    }
+    Ok(num_lines)
 }
 
 pub fn run(config: Config) -> MyResult<()> {
     let max_files_num = config.files.len();
     for (file_num, filename) in config.files.iter().enumerate() {
+        println!("{}", filename);
         match open(&filename) {
             Err(e) => eprintln!("Failed to open {}: {}", filename, e),
             Ok(mut file) => {
@@ -31,8 +49,18 @@ pub fn run(config: Config) -> MyResult<()> {
                     let bytes_read = handle.read(&mut buffer)?;
                     print!("{}", String::from_utf8_lossy(&buffer[..bytes_read]));
                 } else {
+                    let max_lines = count_lines(&filename)?;
                     let mut line = String::new();
-                    for _ in 0..config.lines {
+                    let end = if config.is_negative_lines {
+                        if max_lines > config.lines {
+                            max_lines - config.lines
+                        } else {
+                            0
+                        }
+                    } else {
+                        config.lines
+                    };
+                    for _ in 0..end {
                         let bytes = file.read_line(&mut line)?;
                         if bytes == 0 {
                             break;
@@ -57,6 +85,7 @@ pub fn get_args() -> MyResult<Config> {
                 .value_name("FILE")
                 .multiple(true)
                 .help("Input file(s)")
+                .allow_hyphen_values(false)
                 .default_value("-"),
         )
         .arg(
@@ -65,6 +94,8 @@ pub fn get_args() -> MyResult<Config> {
                 .long("lines")
                 .value_name("LINES")
                 .help("Print the first NUM lines instead of the first 10")
+                .takes_value(true)
+                .allow_hyphen_values(true)
                 .default_value("10"),
         )
         .arg(
@@ -78,19 +109,59 @@ pub fn get_args() -> MyResult<Config> {
         .get_matches();
     let lines = matches
         .value_of("lines")
-        .map(parse_positive_int)
+        .map(parse_int)
         .transpose()
         .map_err(|e| format!("illegal line count -- {}", e))?;
+    let is_negative_lines = matches
+        .value_of("lines")
+        .map_or(false, |s| s.starts_with('-'));
     let bytes = matches
         .value_of("bytes")
         .map(parse_positive_int)
         .transpose()
         .map_err(|e| format!("illegal byte count -- {}", e))?;
+
     Ok(Config {
         files: matches.values_of_lossy("file").unwrap(),
         lines: lines.unwrap(),
+        is_negative_lines,
         bytes,
     })
+}
+
+fn parse_int(val: &str) -> MyResult<isize> {
+    let num_re = Regex::new(r"^([+-])?(\d+)$").unwrap();
+    match num_re.captures(val) {
+        Some(caps) => Ok(caps.get(2).unwrap().as_str().parse()?),
+        _ => Err(From::from(val)),
+    }
+    // let num = match val.strip_prefix("-") {
+    //     Some(num) => num,
+    //     _ => return Err(From::from(val)),
+    // };
+    // match num.parse::<isize>() {
+    //     Ok(n) => Ok(n),
+    //     _ => Err(From::from(val)),
+    // }
+}
+
+#[test]
+fn test_parse_int() {
+    let res = parse_int("-1");
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), 1);
+    let res = parse_int("0");
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), 0);
+    let res = parse_int("-0");
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), 0);
+    let res = parse_int("1");
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), 1);
+    let res = parse_int("foo");
+    assert!(res.is_err());
+    assert_eq!(res.unwrap_err().to_string(), "foo".to_string());
 }
 
 fn parse_positive_int(val: &str) -> MyResult<usize> {
