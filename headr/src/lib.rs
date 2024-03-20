@@ -1,5 +1,7 @@
-use clap::{App, Arg};
+use crate::TakeValue::*;
+use clap::{value_parser, Arg, Command};
 use regex::Regex;
+use std::cmp::min;
 use std::error::Error;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read};
@@ -9,13 +11,22 @@ type MyResult<T> = Result<T, Box<dyn Error>>;
 #[derive(Debug)]
 pub struct Config {
     files: Vec<String>,
-    lines: isize,
-    is_negative_lines: bool,
+    lines: TakeValue,
     bytes: Option<usize>,
 }
 
-fn count_lines(filename: &str) -> MyResult<isize> {
-    let mut file = BufReader::new(File::open(filename)?);
+#[derive(Debug, PartialEq)]
+enum TakeValue {
+    MinusZero,
+    TakeNum(i64),
+}
+
+fn count_lines(filename: &str) -> MyResult<i64> {
+    let mut file: Box<dyn BufRead> = if filename == "-" {
+        Box::new(BufReader::new(io::stdin()))
+    } else {
+        Box::new(BufReader::new(File::open(filename)?))
+    };
     let mut num_lines = 0;
     let mut buf = Vec::new();
     loop {
@@ -29,13 +40,32 @@ fn count_lines(filename: &str) -> MyResult<isize> {
     Ok(num_lines)
 }
 
+fn get_end_line(line_num: &TakeValue, total_lines: i64) -> Option<u64> {
+    match line_num {
+        MinusZero => Some(total_lines as u64),
+        TakeNum(n) => {
+            if *n >= 0 {
+                Some(min(*n as u64, total_lines as u64))
+            } else {
+                if n + total_lines >= 0 {
+                    Some((n + total_lines).try_into().unwrap())
+                } else {
+                    Some(0)
+                }
+            }
+        }
+    }
+}
+
 pub fn run(config: Config) -> MyResult<()> {
+    eprintln!("{:#?}", config);
     let max_files_num = config.files.len();
     for (file_num, filename) in config.files.iter().enumerate() {
-        println!("{}", filename);
+        dbg!(file_num, filename, max_files_num);
         match open(&filename) {
             Err(e) => eprintln!("Failed to open {}: {}", filename, e),
-            Ok(mut file) => {
+            Ok(file) => {
+                // multi files
                 if max_files_num > 1 {
                     println!(
                         "{}==> {} <==",
@@ -43,30 +73,51 @@ pub fn run(config: Config) -> MyResult<()> {
                         filename
                     );
                 }
+
+                // print contents
                 if let Some(num_bytes) = config.bytes {
                     let mut handle = file.take(num_bytes as u64);
                     let mut buffer = vec![0; num_bytes];
                     let bytes_read = handle.read(&mut buffer)?;
                     print!("{}", String::from_utf8_lossy(&buffer[..bytes_read]));
                 } else {
-                    let max_lines = count_lines(&filename)?;
-                    let mut line = String::new();
-                    let end = if config.is_negative_lines {
-                        if max_lines > config.lines {
-                            max_lines - config.lines
-                        } else {
-                            0
+                    let total_lines = count_lines(filename)?;
+                    dbg!(total_lines);
+                    let total_lines_ = count_lines(filename)?;
+                    dbg!(total_lines_);
+                    let mut file_reader = BufReader::new(file);
+                    // let mut file_reader: Box<dyn BufRead> = if filename == "-" {
+                    //     Box::new(BufReader::new(io::stdin()))
+                    // } else {
+                    //     Box::new(BufReader::new(File::open(filename)?))
+                    // };
+                    if let Some(end) = get_end_line(&config.lines, total_lines) {
+                        dbg!(end);
+                        let mut line_num = 0;
+                        // let mut buf = Vec::new();
+                        let mut line = String::new();
+                        for _ in 0..end {
+                            let bytes = file_reader.read_line(&mut line)?;
+                            if bytes == 0 {
+                                break;
+                            }
+                            print!("{line}");
+                            line.clear();
                         }
-                    } else {
-                        config.lines
-                    };
-                    for _ in 0..end {
-                        let bytes = file.read_line(&mut line)?;
-                        if bytes == 0 {
-                            break;
-                        }
-                        print!("{}", line);
-                        line.clear();
+                        // loop {
+                        //     let bytes_read = file_reader.read_until(b'\n', &mut buf)?;
+                        //     if bytes_read == 0 {
+                        //         dbg!("exit");
+                        //         break;
+                        //     }
+                        //     if line_num < end {
+                        //         print!("{}", String::from_utf8_lossy(&buf));
+                        //     } else {
+                        //         break;
+                        //     }
+                        //     line_num += 1;
+                        //     buf.clear();
+                        // }
                     }
                 }
             }
@@ -76,117 +127,90 @@ pub fn run(config: Config) -> MyResult<()> {
 }
 
 pub fn get_args() -> MyResult<Config> {
-    let matches = App::new("headr")
+    let matches = Command::new("headr")
         .version("0.1.0")
         .author("Masahiro Mori")
         .about("Rusty head")
         .arg(
-            Arg::with_name("file")
+            Arg::new("file")
                 .value_name("FILE")
-                .multiple(true)
+                .action(clap::ArgAction::Append)
                 .help("Input file(s)")
-                .allow_hyphen_values(false)
                 .default_value("-"),
         )
         .arg(
-            Arg::with_name("lines")
-                .short("n")
+            Arg::new("lines")
+                .short('n')
                 .long("lines")
                 .value_name("LINES")
                 .help("Print the first NUM lines instead of the first 10")
-                .takes_value(true)
-                .allow_hyphen_values(true)
+                .allow_negative_numbers(true)
                 .default_value("10"),
         )
         .arg(
-            Arg::with_name("bytes")
-                .short("c")
+            Arg::new("bytes")
+                .short('c')
                 .long("bytes")
                 .value_name("BYTES")
                 .conflicts_with("lines")
-                .help("Print the first NUM bytes of each file"),
+                .help("Print the first NUM bytes of each file")
+                .value_parser(value_parser!(usize)),
         )
         .get_matches();
     let lines = matches
-        .value_of("lines")
-        .map(parse_int)
+        .get_one("lines")
+        .cloned()
+        .map(|l: String| parse_num(l.as_str()))
         .transpose()
-        .map_err(|e| format!("illegal line count -- {}", e))?;
-    let is_negative_lines = matches
-        .value_of("lines")
-        .map_or(false, |s| s.starts_with('-'));
-    let bytes = matches
-        .value_of("bytes")
-        .map(parse_positive_int)
-        .transpose()
-        .map_err(|e| format!("illegal byte count -- {}", e))?;
+        .map_err(|e| {
+            format!("invalid value '{e}' for '--lines <LINES>': invalid digit found in string")
+        })?
+        .unwrap();
+    dbg!(&lines);
+    let bytes = matches.get_one::<usize>("bytes").copied();
 
     Ok(Config {
-        files: matches.values_of_lossy("file").unwrap(),
-        lines: lines.unwrap(),
-        is_negative_lines,
+        files: matches
+            .get_many::<String>("file")
+            .unwrap()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>(),
+        lines, //: parse_num("10")?,
         bytes,
     })
 }
 
-fn parse_int(val: &str) -> MyResult<isize> {
-    let num_re = Regex::new(r"^([+-])?(\d+)$").unwrap();
+fn parse_num(val: &str) -> MyResult<TakeValue> {
+    let num_re = Regex::new(r"^(-)?(\d+)$").unwrap();
+    dbg!(num_re.captures(val));
     match num_re.captures(val) {
-        Some(caps) => Ok(caps.get(2).unwrap().as_str().parse()?),
-        _ => Err(From::from(val)),
-    }
-    // let num = match val.strip_prefix("-") {
-    //     Some(num) => num,
-    //     _ => return Err(From::from(val)),
-    // };
-    // match num.parse::<isize>() {
-    //     Ok(n) => Ok(n),
-    //     _ => Err(From::from(val)),
-    // }
-}
-
-#[test]
-fn test_parse_int() {
-    let res = parse_int("-1");
-    assert!(res.is_ok());
-    assert_eq!(res.unwrap(), 1);
-    let res = parse_int("0");
-    assert!(res.is_ok());
-    assert_eq!(res.unwrap(), 0);
-    let res = parse_int("-0");
-    assert!(res.is_ok());
-    assert_eq!(res.unwrap(), 0);
-    let res = parse_int("1");
-    assert!(res.is_ok());
-    assert_eq!(res.unwrap(), 1);
-    let res = parse_int("foo");
-    assert!(res.is_err());
-    assert_eq!(res.unwrap_err().to_string(), "foo".to_string());
-}
-
-fn parse_positive_int(val: &str) -> MyResult<usize> {
-    match val.parse() {
-        Ok(n) if n > 0 => Ok(n),
+        Some(caps) => {
+            let sign = caps.get(1).map_or("+", |m| m.as_str());
+            let num = format!("{}{}", sign, caps.get(2).unwrap().as_str());
+            if let Ok(val) = num.parse() {
+                if sign == "-" && val == 0 {
+                    Ok(MinusZero)
+                } else {
+                    Ok(TakeNum(val))
+                }
+            } else {
+                Err(From::from(val))
+            }
+        }
         _ => Err(From::from(val)),
     }
 }
 
 #[test]
-fn test_parse_positive_int() {
-    // 3は正の整数なのでOK
-    let res = parse_positive_int("3");
-    assert!(res.is_ok());
-    assert_eq!(res.unwrap(), 3);
-
-    // 数字でない文字列の場合はエラー
-    let res = parse_positive_int("foo");
-    assert!(res.is_err());
-    assert_eq!(res.unwrap_err().to_string(), "foo".to_string());
-
-    // 0の場合もエラー
-    let res = parse_positive_int("0");
-    assert!(res.is_err());
-    assert_eq!(res.unwrap_err().to_string(), "0".to_string());
+fn test_parse_num() {
+    let ret = parse_num("1");
+    assert_eq!(ret.unwrap(), TakeNum(1));
+    let ret = parse_num("0");
+    assert_eq!(ret.unwrap(), TakeNum(0));
+    let ret = parse_num("-0");
+    assert_eq!(ret.unwrap(), MinusZero);
+    let ret = parse_num("-1");
+    assert_eq!(ret.unwrap(), TakeNum(-1));
 }
 
 fn open(filename: &str) -> MyResult<Box<dyn BufRead>> {
