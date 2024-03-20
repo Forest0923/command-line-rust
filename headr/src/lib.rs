@@ -62,10 +62,8 @@ fn get_end_line(line_num: &TakeValue, total_lines: i64) -> Option<u64> {
 }
 
 pub fn run(config: Config) -> MyResult<()> {
-    eprintln!("{:#?}", config);
     let max_files_num = config.files.len();
     for (file_num, filename) in config.files.iter().enumerate() {
-        dbg!(file_num, filename, max_files_num);
         match open(&filename) {
             Err(e) => eprintln!("Failed to open {}: {}", filename, e),
             Ok(file) => {
@@ -172,7 +170,6 @@ pub fn get_args() -> MyResult<Config> {
             format!("invalid value '{e}' for '--lines <LINES>': invalid digit found in string")
         })?
         .unwrap();
-    dbg!(&lines);
     let bytes = matches.get_one::<usize>("bytes").copied();
 
     Ok(Config {
@@ -188,7 +185,6 @@ pub fn get_args() -> MyResult<Config> {
 
 fn parse_num(val: &str) -> MyResult<TakeValue> {
     let num_re = Regex::new(r"^(-)?(\d+)$").unwrap();
-    dbg!(num_re.captures(val));
     match num_re.captures(val) {
         Some(caps) => {
             let sign = caps.get(1).map_or("+", |m| m.as_str());
