@@ -1,0 +1,21 @@
+==> ./tests/inputs/empty.txt <==
+
+==> ./tests/inputs/one.txt <==
+
+==> ./tests/inputs/two.txt <==
+Two lines.
+
+==> ./tests/inputs/three.txt <==
+Three
+lines,
+
+==> ./tests/inputs/ten.txt <==
+one
+two
+three
+four
+five
+six
+seven
+eight
+nine
