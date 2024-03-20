@@ -21,7 +21,7 @@ enum TakeValue {
     TakeNum(i64),
 }
 
-fn count_lines(filename: &str) -> MyResult<i64> {
+fn count_lines(filename: &str) -> MyResult<(i64, Vec<u8>)> {
     let mut file: Box<dyn BufRead> = if filename == "-" {
         Box::new(BufReader::new(io::stdin()))
     } else {
@@ -29,15 +29,19 @@ fn count_lines(filename: &str) -> MyResult<i64> {
     };
     let mut num_lines = 0;
     let mut buf = Vec::new();
+    let mut stdin_buf = Vec::new();
     loop {
         let bytes_read = file.read_until(b'\n', &mut buf)?;
         if bytes_read == 0 {
             break;
         }
         num_lines += 1;
+        if filename == "-" {
+            stdin_buf.extend_from_slice(&buf);
+        }
         buf.clear();
     }
-    Ok(num_lines)
+    Ok((num_lines, stdin_buf))
 }
 
 fn get_end_line(line_num: &TakeValue, total_lines: i64) -> Option<u64> {
@@ -81,45 +85,47 @@ pub fn run(config: Config) -> MyResult<()> {
                     let bytes_read = handle.read(&mut buffer)?;
                     print!("{}", String::from_utf8_lossy(&buffer[..bytes_read]));
                 } else {
-                    let total_lines = count_lines(filename)?;
-                    dbg!(total_lines);
-                    let total_lines_ = count_lines(filename)?;
-                    dbg!(total_lines_);
-                    let mut file_reader = BufReader::new(file);
-                    // let mut file_reader: Box<dyn BufRead> = if filename == "-" {
-                    //     Box::new(BufReader::new(io::stdin()))
-                    // } else {
-                    //     Box::new(BufReader::new(File::open(filename)?))
-                    // };
-                    if let Some(end) = get_end_line(&config.lines, total_lines) {
-                        dbg!(end);
-                        let mut line_num = 0;
-                        // let mut buf = Vec::new();
-                        let mut line = String::new();
-                        for _ in 0..end {
-                            let bytes = file_reader.read_line(&mut line)?;
-                            if bytes == 0 {
-                                break;
-                            }
-                            print!("{line}");
-                            line.clear();
-                        }
-                        // loop {
-                        //     let bytes_read = file_reader.read_until(b'\n', &mut buf)?;
-                        //     if bytes_read == 0 {
-                        //         dbg!("exit");
-                        //         break;
-                        //     }
-                        //     if line_num < end {
-                        //         print!("{}", String::from_utf8_lossy(&buf));
-                        //     } else {
-                        //         break;
-                        //     }
-                        //     line_num += 1;
-                        //     buf.clear();
-                        // }
-                    }
+                    let (total_lines, stdin_buf) = count_lines(filename)?;
+                    let stdin_buf = String::from_utf8_lossy(&stdin_buf);
+                    let _ = print_lines(
+                        file,
+                        &config.lines,
+                        filename.to_string(),
+                        total_lines,
+                        stdin_buf.to_string(),
+                    );
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_lines(
+    file: Box<dyn BufRead>,
+    lines: &TakeValue,
+    filename: String,
+    total_lines: i64,
+    stdin_buf: String,
+) -> MyResult<()> {
+    let mut file_reader = BufReader::new(file);
+    if let Some(end) = get_end_line(&lines, total_lines) {
+        let mut line = String::new();
+        if filename == "-" {
+            for (current_line, line) in stdin_buf.split('\n').enumerate() {
+                if current_line < end.try_into().unwrap() {
+                    println!("{}", line);
+                }
+            }
+        } else {
+            for _ in 0..end {
+                let bytes = file_reader.read_line(&mut line)?;
+                if bytes == 0 {
+                    break;
+                }
+
+                print!("{line}");
+                line.clear();
             }
         }
     }
