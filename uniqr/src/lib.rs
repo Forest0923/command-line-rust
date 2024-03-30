@@ -59,11 +59,20 @@ pub fn run(config: Config) -> MyResult<()> {
         None => Box::new(io::stdout()),
     };
 
+    let mut print = |count: u64, text: &str| {
+        let out = if config.count {
+            format!("{:>4} {}", count, text)
+        } else {
+            format!("{}", text)
+        };
+        let _ = out_file.write_all(out.as_bytes());
+    };
+
     loop {
         let bytes = file.read_line(&mut line)?;
         if bytes == 0 {
             if !pre_line.is_empty() {
-                let _ = print_line(&config, count, pre_line, &mut out_file);
+                print(count, &pre_line.as_str());
             }
             break;
         }
@@ -72,7 +81,7 @@ pub fn run(config: Config) -> MyResult<()> {
             count += 1;
         } else {
             if count != 0 {
-                let _ = print_line(&config, count, pre_line, &mut out_file);
+                print(count, &pre_line.as_str());
             }
             count = 1;
             pre_line = line.clone();
@@ -87,14 +96,4 @@ fn open(filename: &str) -> MyResult<Box<dyn BufRead>> {
         "-" => Ok(Box::new(BufReader::new(io::stdin()))),
         _ => Ok(Box::new(BufReader::new(File::open(filename)?))),
     }
-}
-
-fn print_line(config: &Config, count: u64, line: String, mut out_file: impl Write) -> MyResult<()> {
-    let out = if config.count {
-        format!("{:>4} {}", count, line)
-    } else {
-        format!("{}", line)
-    };
-    let _ = out_file.write_all(out.as_bytes());
-    Ok(())
 }
