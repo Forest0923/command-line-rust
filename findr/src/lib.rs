@@ -2,6 +2,7 @@ use crate::EntryType::*;
 use clap::{value_parser, Arg, ArgAction, Command};
 use regex::Regex;
 use std::error::Error;
+use walkdir::WalkDir;
 
 type MyResult<T> = Result<T, Box<dyn Error>>;
 
@@ -38,7 +39,8 @@ pub fn get_args() -> MyResult<Config> {
                 .long("name")
                 .help("Name")
                 .action(ArgAction::Append)
-                .value_parser(Regex::new),
+                .value_parser(Regex::new)
+                .num_args(0..),
         )
         .arg(
             Arg::new("types")
@@ -47,7 +49,8 @@ pub fn get_args() -> MyResult<Config> {
                 .long("type")
                 .help("Entry type")
                 .action(ArgAction::Append)
-                .value_parser(["f", "d", "l"]),
+                .value_parser(["f", "d", "l"])
+                .num_args(0..),
         )
         .get_matches();
 
@@ -72,6 +75,34 @@ pub fn get_args() -> MyResult<Config> {
 }
 
 pub fn run(config: Config) -> MyResult<()> {
-    dbg!(config);
+    dbg!(&config);
+    for path in config.paths {
+        for entry in WalkDir::new(path) {
+            match entry {
+                Err(e) => eprintln!("{}", e),
+                Ok(entry) => {
+                    let entry_type = if entry.file_type().is_dir() {
+                        Dir
+                    } else if entry.file_type().is_file() {
+                        File
+                    } else if entry.file_type().is_symlink() {
+                        Link
+                    } else {
+                        unreachable!()
+                    };
+                    if config.entry_types.is_empty() || config.entry_types.contains(&entry_type) {
+                        if config.names.is_empty()
+                            || config
+                                .names
+                                .iter()
+                                .any(|name| name.is_match(&entry.file_name().to_string_lossy()))
+                        {
+                            println!("{}", entry.path().display());
+                        }
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
