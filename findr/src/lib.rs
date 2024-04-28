@@ -75,7 +75,7 @@ pub fn get_args() -> MyResult<Config> {
 }
 
 pub fn run(config: Config) -> MyResult<()> {
-    dbg!(&config);
+    // dbg!(&config);
     for path in config.paths {
         for entry in WalkDir::new(path) {
             match entry {
